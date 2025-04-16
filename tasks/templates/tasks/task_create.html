@@ -1,0 +1,36 @@
+{% extends 'tasks/base.html' %}
+{% load crispy_forms_tags %}
+
+{% block title %}Create Task - Task Manager{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h1>Create New Task</h1>
+    </div>
+    <div class="col-auto">
+        <a href="{% url 'task-list' %}" class="btn btn-secondary">Back to List</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST">
+            {% csrf_token %}
+            {{ form|crispy }}
+            <div class="mt-4">
+                <button type="submit" class="btn btn-primary">Create and Queue Task</button>
+                <a href="{% url 'task-list' %}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="alert alert-info mt-4">
+    <h5>Note:</h5>
+    <p>
+        After creating a task, it will be automatically queued for processing by the Celery worker.
+        You can monitor its progress on the task detail page or through the Flower interface.
+    </p>
+</div>
+{% endblock %}
