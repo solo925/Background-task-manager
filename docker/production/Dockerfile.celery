@@ -1,0 +1,53 @@
+FROM python:3.12-slim as builder
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+# Install dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc postgresql-client libpq-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create a virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install dependencies
+COPY requirements/production.txt .
+RUN pip install --no-cache-dir -r production.txt
+
+# Main image
+FROM python:3.12-slim
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install runtime dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends postgresql-client && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+WORKDIR /app
+
+# Copy application code
+COPY . /app/
+
+# Create a non-root user
+RUN adduser --disabled-password --gecos '' appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
+# Set up entrypoint script
+COPY docker/production/celery-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Run entrypoint script
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Run Celery worker
+CMD ["celery", "-A", "task_manager", "worker", "--loglevel=info"]

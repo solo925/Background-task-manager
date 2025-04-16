@@ -1,0 +1,65 @@
+name: CD Pipeline
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    branches: [main]
+    types:
+      - completed
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Terraform
+      uses: hashicorp/setup-terraform@v2
+      
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-west-2
+        
+    - name: Terraform Init
+      run: |
+        cd terraform/environments/production
+        terraform init
+        
+    - name: Terraform Apply
+      run: |
+        cd terraform/environments/production
+        terraform apply -auto-approve
+        
+    - name: Get Kubeconfig
+      run: |
+        aws eks update-kubeconfig --name task-manager-cluster --region us-west-2
+        
+    - name: Deploy to Kubernetes
+      uses: Azure/k8s-deploy@v4
+      with:
+        namespace: production
+        manifests: |
+          kubernetes/base/deployment.yaml
+          kubernetes/base/service.yaml
+          kubernetes/overlays/production/kustomization.yaml
+        images: |
+          yourusername/taskmanager-web:${{ github.sha }}
+          yourusername/taskmanager-celery:${{ github.sha }}
+        
+    - name: Verify deployment
+      run: |
+        kubectl rollout status deployment/taskmanager-web -n production
+        kubectl rollout status deployment/taskmanager-celery -n production
+        
+    - name: Notify deployment status
+      uses: rtCamp/action-slack-notify@v2
+      env:
+        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        SLACK_TITLE: "Production Deployment"
+        SLACK_MESSAGE: "Successfully deployed version ${{ github.sha }} to production!"
+        SLACK_COLOR: ${{ job.status }}

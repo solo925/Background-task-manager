@@ -1,0 +1,64 @@
+FROM python:3.12-slim as builder
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+# Install dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc postgresql-client libpq-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create a virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install dependencies
+COPY requirements/production.txt .
+RUN pip install --no-cache-dir -r production.txt
+
+# Main image
+FROM python:3.12-slim
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install runtime dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends postgresql-client curl && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+RUN mkdir -p /app/static /app/media
+WORKDIR /app
+
+# Copy application code
+COPY . /app/
+
+# Create a non-root user
+RUN adduser --disabled-password --gecos '' appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
+# Set up entrypoint script
+COPY docker/production/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Collect static files
+RUN python manage.py collectstatic --noinput
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health/ || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Run entrypoint script
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Run Gunicorn
+CMD ["gunicorn", "task_manager.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4", "--threads", "4"]
